@@ -65,6 +65,7 @@ class App:
 
         self.label.config(text="Analyse terminée 🎉")
         messagebox.showinfo("Succès", "Analyse complète terminée")
+        root.destroy()  # ← ferme la fenêtre automatiquement après le OK
         self.button.config(state="normal")
 
     def start(self):

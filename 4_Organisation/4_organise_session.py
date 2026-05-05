@@ -64,7 +64,7 @@ def ask_metadata():
 
     def clean_date():
         while True:
-            val = input("Date (JJ/MM/AAAA) : ").strip()
+            val = input("Date du test (JJ/MM/AAAA) : ").strip()
             parts = val.split("/")
             if len(parts) == 3:
                 j, m, a = parts
@@ -101,7 +101,7 @@ def ask_metadata():
             print("❌ Choix invalide.")
 
     # =========================
-    # 🔥 SÉLECTION PERSONNE EXISTANTE
+    # 🔥 SÉLECTION PERSONNE EXISTANTE (recherche par frappe)
     # =========================
     nom = None
     prenom = None
@@ -110,21 +110,43 @@ def ask_metadata():
         df_idx = pd.read_csv(INDEX_CSV)
         if "nom" in df_idx.columns and len(df_idx) > 0:
 
-            # Liste unique des personnes
             personnes = df_idx[["nom", "prenom"]].drop_duplicates().reset_index(drop=True)
 
-            print("\n==== PERSONNES EXISTANTES ====")
-            for i, row in personnes.iterrows():
-                print(f"{i+1} - {row['prenom']} {row['nom']}")
-            print("0 - Nouvelle personne")
-            print("==============================")
+            print("\n==== RECHERCHE ATHLÈTE ====")
+            print("Tape les premières lettres du nom ou prénom (ou tape 0 = nouvelle personne)")
+            print("===========================")
 
             while True:
-                choix = input("Choix : ").strip()
+                query = input("Recherche : ").strip().lower()
+
+                if query == "0":
+                    break
+
+                # Filtrage sur nom OU prénom
+                mask = (
+                        personnes["nom"].str.lower().str.startswith(query) |
+                        personnes["prenom"].str.lower().str.startswith(query)
+                )
+                resultats = personnes[mask].reset_index(drop=True)
+
+                if len(resultats) == 0:
+                    print("  Aucun résultat. Réessaie ou tape 0 pour créer une nouvelle personne.")
+                    continue
+
+                # Affiche les correspondances numérotées
+                print(f"\n  {len(resultats)} résultat(s) :")
+                for i, row in resultats.iterrows():
+                    print(f"  {i + 1} - {row['prenom']} {row['nom']}")
+                print("  [Entrée] pour affiner | 0 pour nouvelle personne")
+
+                choix = input("  Sélection : ").strip()
+
                 if choix == "0":
                     break
-                if choix.isdigit() and 1 <= int(choix) <= len(personnes):
-                    row = personnes.iloc[int(choix) - 1]
+                if choix == "":
+                    continue  # affiner la recherche
+                if choix.isdigit() and 1 <= int(choix) <= len(resultats):
+                    row = resultats.iloc[int(choix) - 1]
                     nom = row["nom"]
                     prenom = row["prenom"]
                     print(f"✅ Sélectionné : {prenom} {nom}")

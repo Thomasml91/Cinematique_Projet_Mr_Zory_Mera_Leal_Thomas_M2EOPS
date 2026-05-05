@@ -3,6 +3,7 @@ import os
 import json
 import numpy as np
 import time
+import tkinter as tk
 
 
 # ======================================
@@ -12,23 +13,21 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 VIDEO_PATH = os.path.join(BASE_DIR, "1_Fichiers_Vidéos", "CMJ_frontale.mp4")
 PARAMS_PATH = os.path.join(BASE_DIR, "1_Fichiers_Vidéos", "parametres_selection_frontale.json")
 
-
 FPS_FORCED = 240
-
-MAX_DISPLAY_WIDTH = 1000
+SIDEBAR_W = 280
 
 
 # ======================================
 # ROTATION
 # ======================================
 def rotate_frame(frame, angle):
-   if angle == 90:
-       return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-   elif angle == 180:
-       return cv2.rotate(frame, cv2.ROTATE_180)
-   elif angle == 270:
-       return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-   return frame
+    if angle == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    elif angle == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    elif angle == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
 
 
 # ======================================
@@ -36,169 +35,164 @@ def rotate_frame(frame, angle):
 # ======================================
 def main():
 
+    # ---- Détecter la résolution de l'écran ----
+    root = tk.Tk()
+    SCREEN_W = root.winfo_screenwidth()
+    SCREEN_H = root.winfo_screenheight()
+    root.destroy()
 
-   # ---- Charger vidéo ----
-   if not os.path.exists(VIDEO_PATH):
-       raise FileNotFoundError("❌ Vidéo introuvable.")
+    TASKBAR_H  = 60   # Barre des tâches Windows
+    TRACKBAR_H = 70   # Slider OpenCV en haut de la fenêtre
 
+    # Zone dispo pour la vidéo
+    MAX_DISPLAY_HEIGHT = SCREEN_H - TASKBAR_H - TRACKBAR_H - 20
+    MAX_DISPLAY_WIDTH  = SCREEN_W - SIDEBAR_W - 20
 
-   cap = cv2.VideoCapture(VIDEO_PATH)
-   total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    # ---- Charger vidéo ----
+    if not os.path.exists(VIDEO_PATH):
+        raise FileNotFoundError("❌ Vidéo introuvable.")
 
-   current_frame = 0
-   rotation_angle = 0
-   frame_contact = None
-   frame_takeoff = None
+    cap = cv2.VideoCapture(VIDEO_PATH)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    current_frame = 0
+    rotation_angle = 0
+    frame_contact = None
+    frame_takeoff = None
 
-   # ---- Fenêtre + Slider ----
-   cv2.namedWindow("Frontale", cv2.WINDOW_AUTOSIZE)
+    # ---- Fenêtre plein écran ----
+    cv2.namedWindow("Frontale", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Frontale", SCREEN_W, SCREEN_H - TASKBAR_H)
+    cv2.moveWindow("Frontale", 0, 0)
 
-   def on_trackbar(val):
-       nonlocal current_frame
-       current_frame = val
+    cv2.createTrackbar("Frame", "Frontale", 0, total_frames - 1,
+                       lambda val: None)
 
+    saved = False
 
-   cv2.createTrackbar("Frame", "Frontale", 0, total_frames - 1, on_trackbar)
+    # ======================================
+    # LOOP
+    # ======================================
+    while True:
 
+        if saved:
+            time.sleep(1)
+            break
 
-   saved = False   # Pour afficher le message de sauvegarde
+        # Sync trackbar -> current_frame
+        current_frame = cv2.getTrackbarPos("Frame", "Frontale")
 
+        cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-   # ======================================
-   # LOOP
-   # ======================================
-   while True:
+        frame = rotate_frame(frame, rotation_angle)
 
+        # ---- Redimensionnement adaptatif ----
+        h, w = frame.shape[:2]
+        scale = min(MAX_DISPLAY_HEIGHT / h, MAX_DISPLAY_WIDTH / w, 1.0)
+        frame = cv2.resize(frame, (int(w * scale), int(h * scale)),
+                           interpolation=cv2.INTER_AREA)
 
-       # Si sauvegardé → petit délai puis fermeture automatique
-       if saved:
-           time.sleep(1)
-           break
+        fh, fw = frame.shape[:2]
 
+        # ---- Canvas plein écran ----
+        canvas_h = SCREEN_H - TASKBAR_H - TRACKBAR_H
+        canvas_w = SCREEN_W
+        canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
 
-       cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-       ret, frame = cap.read()
-       if not ret:
-           break
+        # Vidéo à droite de la sidebar, centrée verticalement
+        offset_x = SIDEBAR_W
+        offset_y = (canvas_h - fh) // 2
+        canvas[offset_y:offset_y+fh, offset_x:offset_x+fw] = frame
 
-       frame = rotate_frame(frame, rotation_angle)
+        # ---- Sidebar noire ----
+        cv2.rectangle(canvas, (0, 0), (SIDEBAR_W - 10, canvas_h), (0, 0, 0), -1)
 
-       # Adapter à la hauteur de l'écran
-       MAX_DISPLAY_HEIGHT = 800
-       h, w = frame.shape[:2]
-       if h > MAX_DISPLAY_HEIGHT:
-           scale = MAX_DISPLAY_HEIGHT / h
-           frame = cv2.resize(frame, (int(w * scale), int(h * scale)),
-                              interpolation=cv2.INTER_AREA)
+        # ---- Titre ----
+        cv2.putText(canvas, "CONTROLES CLAVIER", (15, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
 
+        # ---- Commandes ----
+        lines = [
+            " A / <- : -1 frame",
+            " D / -> : +1 frame",
+            " Q : -10 frames",
+            " W : +10 frames",
+            " R : rotation 90",
+            " C : marquer Contact",
+            " T : marquer Decollage",
+            " S : sauvegarder",
+            " ESC : quitter"
+        ]
+        for i, txt in enumerate(lines):
+            cv2.putText(canvas, txt, (15, 75 + i * 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-       # --------------- CANVAS (propre) ---------------
-       canvas_h = frame.shape[0] + 40
-       canvas_w = frame.shape[1] + 300
-       canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+        # ---- Infos dynamiques ----
+        y_info = 380
+        cv2.putText(canvas, f"Frame: {current_frame}/{total_frames-1}",
+                    (15, y_info), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+        cv2.putText(canvas, f"Rotation: {rotation_angle} deg",
+                    (15, y_info + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
 
+        if frame_contact is not None:
+            cv2.putText(canvas, f"Contact: {frame_contact}",
+                        (15, y_info + 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
-       # Centrer la vidéo
-       offset_x = 280  # OK tel quel, rien de critique
-       offset_y = 20
-       canvas[offset_y:offset_y+frame.shape[0], offset_x:offset_x+frame.shape[1]] = frame
+        if frame_takeoff is not None:
+            cv2.putText(canvas, f"Decollage: {frame_takeoff}",
+                        (15, y_info + 105), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 150, 255), 2)
 
+        # ---- Message sauvegarde ----
+        if saved:
+            cv2.rectangle(canvas, (10, y_info + 140), (260, y_info + 185), (0, 180, 0), -1)
+            cv2.putText(canvas, "Sauvegarde OK", (20, y_info + 170),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-       # ---- Sidebar noire ----
-       cv2.rectangle(canvas, (0, 0), (260, canvas_h), (0, 0, 0), -1)
+        cv2.imshow("Frontale", canvas)
 
+        # ---- Touches clavier ----
+        key = cv2.waitKey(20) & 0xFF
 
-       # ---- Encadré commandes clavier ----
-       cv2.putText(canvas, "CONTROLES CLAVIER", (20, 40),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+        if key in [ord('d'), 83]:
+            current_frame = min(total_frames - 1, current_frame + 1)
+            cv2.setTrackbarPos("Frame", "Frontale", current_frame)
+        elif key in [ord('a'), 81]:
+            current_frame = max(0, current_frame - 1)
+            cv2.setTrackbarPos("Frame", "Frontale", current_frame)
+        elif key == ord('w'):
+            current_frame = min(total_frames - 1, current_frame + 10)
+            cv2.setTrackbarPos("Frame", "Frontale", current_frame)
+        elif key == ord('q'):
+            current_frame = max(0, current_frame - 10)
+            cv2.setTrackbarPos("Frame", "Frontale", current_frame)
+        elif key == ord('r'):
+            rotation_angle = (rotation_angle + 90) % 360
+        elif key == ord('c'):
+            frame_contact = current_frame
+        elif key == ord('t'):
+            frame_takeoff = current_frame
 
+        elif key == ord('s'):
+            params = {
+                "rotation": rotation_angle,
+                "frame_contact": frame_contact,
+                "frame_takeoff": frame_takeoff,
+                "fps": FPS_FORCED
+            }
+            with open(PARAMS_PATH, "w") as f:
+                json.dump(params, f, indent=2)
+            print("Parametres sauvegardes :", PARAMS_PATH)
+            saved = True
 
-       lines = [
-           " A / <- : -1 frame",
-           " D / -> : +1 frame",
-           " Q : -10",
-           " W : +10",
-           " R : rotation 90",
-           " C : marquer Contact",
-           " T : marquer Decollage",
-           " S : sauvegarder",
-           " ESC : quitter"
-       ]
+        elif key == 27:  # ESC
+            break
 
-
-       for i, txt in enumerate(lines):
-           cv2.putText(canvas, txt, (20, 80 + i*30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-
-
-       # ---- Infos dynamiques ----
-       cv2.putText(canvas, f"Frame: {current_frame}/{total_frames-1}",
-                   (20, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-
-
-       cv2.putText(canvas, f"Rotation: {rotation_angle} deg",
-                   (20, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
-
-
-       if frame_contact is not None:
-           cv2.putText(canvas, f"Contact: {frame_contact}",
-                       (20, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-
-
-       if frame_takeoff is not None:
-           cv2.putText(canvas, f"Decollage: {frame_takeoff}",
-                       (20, 500), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,150,255), 2)
-
-
-       # Si sauvegardé → encadré vert
-       if saved:
-           cv2.rectangle(canvas, (10, 540), (250, 590), (0,180,0), -1)
-           cv2.putText(canvas, "Sauvegarde OK ✓", (20, 575),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-
-       cv2.setTrackbarPos("Frame", "Frontale", current_frame)
-
-       cv2.imshow("Frontale", canvas)
-
-
-       # ---- Touches clavier ----
-       key = cv2.waitKey(20) & 0xFF
-
-
-       if key in [ord('d'), 83]: current_frame = min(total_frames-1, current_frame + 1)
-       elif key in [ord('a'), 81]: current_frame = max(0, current_frame - 1)
-       elif key == ord('w'): current_frame = min(total_frames-1, current_frame + 10)
-       elif key == ord('q'): current_frame = max(0, current_frame - 10)
-       elif key == ord('r'): rotation_angle = (rotation_angle + 90) % 360
-       elif key == ord('c'): frame_contact = current_frame
-       elif key == ord('t'): frame_takeoff = current_frame
-
-
-       elif key == ord('s'):
-           params = {
-               "rotation": rotation_angle,
-               "frame_contact": frame_contact,
-               "frame_takeoff": frame_takeoff,
-               "fps": FPS_FORCED
-           }
-           with open(PARAMS_PATH, "w") as f:
-               json.dump(params, f, indent=2)
-
-
-           print("💾 Paramètres sauvegardés :", PARAMS_PATH)
-           saved = True   # Active l'encadré vert → puis fermeture
-
-
-       elif key == 27:  # ESC
-           break
-
-
-   cap.release()
-   cv2.destroyAllWindows()
-
-
+    cap.release()
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-   main()
+    main()
