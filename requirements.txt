@@ -4,4 +4,4 @@ opencv-python==4.8.0.76
 pandas==2.1.4
 matplotlib==3.8.2
 scipy==1.11.4
-fpdf==1.7.2
+fpdf2==2.7.8
